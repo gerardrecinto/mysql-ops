@@ -1,0 +1,123 @@
+# Lab only: emptyDir storage and a plain password secret. A primary and a replica, a Job that wires them
+# together, and replication-watch reading the replica.
+apiVersion: v1
+kind: Secret
+metadata: {name: mysql-root}
+stringData: {password: rootpw}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: mysql-primary, labels: {app: mysql-primary}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: mysql-primary}}
+  template:
+    metadata: {labels: {app: mysql-primary}}
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.4
+          args: [--server-id=1, --gtid-mode=ON, --enforce-gtid-consistency=ON, --log-replica-updates=ON]
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: mysql-root, key: password}}
+          ports: [{containerPort: 3306}]
+          readinessProbe:
+            exec: {command: [sh, -c, "mysqladmin ping -h 127.0.0.1 -p$MYSQL_ROOT_PASSWORD"]}
+            periodSeconds: 3
+            failureThreshold: 40
+          resources: {requests: {cpu: 100m, memory: 512Mi}, limits: {memory: 1Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: mysql-primary}
+spec:
+  selector: {app: mysql-primary}
+  ports: [{port: 3306}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: mysql-replica, labels: {app: mysql-replica}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: mysql-replica}}
+  template:
+    metadata: {labels: {app: mysql-replica}}
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.4
+          args: [--server-id=2, --gtid-mode=ON, --enforce-gtid-consistency=ON, --log-replica-updates=ON]
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: mysql-root, key: password}}
+          ports: [{containerPort: 3306}]
+          readinessProbe:
+            exec: {command: [sh, -c, "mysqladmin ping -h 127.0.0.1 -p$MYSQL_ROOT_PASSWORD"]}
+            periodSeconds: 3
+            failureThreshold: 40
+          resources: {requests: {cpu: 100m, memory: 512Mi}, limits: {memory: 1Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: mysql-replica}
+spec:
+  selector: {app: mysql-replica}
+  ports: [{port: 3306}]
+---
+apiVersion: batch/v1
+kind: Job
+metadata: {name: setup-replication}
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: setup
+          image: mysql:8.4
+          env:
+            - name: P
+              valueFrom: {secretKeyRef: {name: mysql-root, key: password}}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              until mysqladmin ping -h mysql-primary -p"$P" --silent; do sleep 2; done
+              until mysqladmin ping -h mysql-replica -p"$P" --silent; do sleep 2; done
+              mysql -h mysql-primary -p"$P" -e "CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED BY 'replpw'; GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';"
+              mysql -h mysql-replica -p"$P" -e "STOP REPLICA; CHANGE REPLICATION SOURCE TO SOURCE_HOST='mysql-primary', SOURCE_USER='repl', SOURCE_PASSWORD='replpw', SOURCE_AUTO_POSITION=1, GET_SOURCE_PUBLIC_KEY=1; START REPLICA;"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: replication-watch, labels: {app: replication-watch}}
+spec:
+  replicas: 1
+  strategy: {rollingUpdate: {maxUnavailable: 0, maxSurge: 1}}
+  progressDeadlineSeconds: 90
+  selector: {matchLabels: {app: replication-watch}}
+  template:
+    metadata: {labels: {app: replication-watch}}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      containers:
+        - name: watch
+          image: replication-watch:ci
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: MYSQL_HOST, value: mysql-replica}
+            - name: MYSQL_PASSWORD
+              valueFrom: {secretKeyRef: {name: mysql-root, key: password}}
+          ports: [{containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 3}
+          livenessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 10}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          resources: {requests: {cpu: 20m, memory: 32Mi}, limits: {memory: 128Mi}}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: replication-watch}
+spec:
+  selector: {app: replication-watch}
+  ports: [{port: 80, targetPort: 8080}]

@@ -1,0 +1,26 @@
+# One primary and two replicas, GTID replication. Ports: 33061 primary, 33062 and 33063 replicas.
+x-mysql: &mysql
+  image: mysql:8.4
+  environment:
+    MYSQL_ROOT_PASSWORD: rootpw
+  healthcheck:
+    test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-prootpw"]
+    interval: 3s
+    timeout: 3s
+    retries: 60
+
+services:
+  primary:
+    <<: *mysql
+    command: [--server-id=1, --gtid-mode=ON, --enforce-gtid-consistency=ON, --log-replica-updates=ON, --binlog-format=ROW,
+              --slow-query-log=ON, --long-query-time=0.05, --slow-query-log-file=/var/lib/mysql/slow.log]
+    ports: ["33061:3306"]
+  replica1:
+    <<: *mysql
+    command: [--server-id=2, --gtid-mode=ON, --enforce-gtid-consistency=ON, --log-replica-updates=ON, --binlog-format=ROW,
+              --replica-parallel-workers=4, --replica-preserve-commit-order=ON]
+    ports: ["33062:3306"]
+  replica2:
+    <<: *mysql
+    command: [--server-id=3, --gtid-mode=ON, --enforce-gtid-consistency=ON, --log-replica-updates=ON, --binlog-format=ROW]
+    ports: ["33063:3306"]

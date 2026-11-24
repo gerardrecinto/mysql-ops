@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  replication:
+    name: Async replication, failover, tuning (MySQL 8.4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r requirements.txt
+      - run: docker compose -f docker-compose.async.yml up -d
+      - run: python -m pytest tests/test_replication.py tests/test_tuning.py
+      - if: failure()
+        run: docker compose -f docker-compose.async.yml logs --tail 80
+      - if: always()
+        run: docker compose -f docker-compose.async.yml down -v
+
+  group-replication:
+    name: Group Replication, election and rejoin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r requirements.txt
+      - run: docker compose -f docker-compose.cluster.yml up -d
+      - run: python -m pytest tests/test_group_replication.py
+      - if: failure()
+        run: docker compose -f docker-compose.cluster.yml logs --tail 80
+      - if: always()
+        run: docker compose -f docker-compose.cluster.yml down -v
+
+  image:
+    name: Unit tests, Docker image, scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r requirements.txt && python -m pytest tests/test_watch.py
+      - run: docker build -t replication-watch:ci .
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: replication-watch:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  kubernetes:
+    name: Deploy to Kubernetes (kind) and watch replication
+    runs-on: ubuntu-latest
+    needs: image
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t replication-watch:ci .
+      - uses: helm/kind-action@v1
+        with: {cluster_name: lab}
+      - run: kind load docker-image replication-watch:ci --name lab
+      - run: kubectl apply -f k8s/lab.yaml
+      - run: |
+          kubectl wait --for=condition=available deployment/mysql-primary deployment/mysql-replica --timeout=240s
+          kubectl wait --for=condition=complete job/setup-replication --timeout=240s
+          kubectl rollout status deployment/replication-watch --timeout=90s
+      - name: Healthy replica answers 200
+        run: |
+          kubectl port-forward svc/replication-watch 8080:80 &
+          sleep 3
+          for i in $(seq 1 20); do
+            code=$(curl -s -o /tmp/r.json -w '%{http_code}' localhost:8080/replication) && [ "$code" = 200 ] && break
+            sleep 3
+          done
+          cat /tmp/r.json; test "$code" = 200
+      - name: Broken replica answers 503
+        run: |
+          kubectl exec deploy/mysql-replica -- mysql -uroot -prootpw -e "STOP REPLICA SQL_THREAD"
+          sleep 2
+          code=$(curl -s -o /tmp/r.json -w '%{http_code}' localhost:8080/replication)
+          cat /tmp/r.json; test "$code" = 503
+      - if: failure()
+        run: kubectl get pods -A && kubectl describe pods | tail -60

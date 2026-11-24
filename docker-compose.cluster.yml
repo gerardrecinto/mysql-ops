@@ -1,0 +1,51 @@
+# Three-node MySQL Group Replication, single primary. Ports 33071 to 33073.
+x-gr: &gr
+  image: mysql:8.4
+  environment:
+    MYSQL_ROOT_PASSWORD: rootpw
+  healthcheck:
+    test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-prootpw"]
+    interval: 3s
+    timeout: 3s
+    retries: 60
+
+services:
+  gr1:
+    <<: *gr
+    hostname: gr1
+    command: [--server-id=1, --report-host=gr1, --gtid-mode=ON, --enforce-gtid-consistency=ON,
+              --log-replica-updates=ON, --binlog-format=ROW,
+              --plugin-load-add=group_replication.so,
+              --loose-group-replication-group-name=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee,
+              --loose-group-replication-start-on-boot=OFF,
+              --loose-group-replication-local-address=gr1:33061,
+              "--loose-group-replication-group-seeds=gr1:33061,gr2:33061,gr3:33061",
+              --loose-group-replication-recovery-get-public-key=ON,
+              --loose-group-replication-bootstrap-group=OFF]
+    ports: ["33071:3306"]
+  gr2:
+    <<: *gr
+    hostname: gr2
+    command: [--server-id=2, --report-host=gr2, --gtid-mode=ON, --enforce-gtid-consistency=ON,
+              --log-replica-updates=ON, --binlog-format=ROW,
+              --plugin-load-add=group_replication.so,
+              --loose-group-replication-group-name=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee,
+              --loose-group-replication-start-on-boot=OFF,
+              --loose-group-replication-local-address=gr2:33061,
+              "--loose-group-replication-group-seeds=gr1:33061,gr2:33061,gr3:33061",
+              --loose-group-replication-recovery-get-public-key=ON,
+              --loose-group-replication-bootstrap-group=OFF]
+    ports: ["33072:3306"]
+  gr3:
+    <<: *gr
+    hostname: gr3
+    command: [--server-id=3, --report-host=gr3, --gtid-mode=ON, --enforce-gtid-consistency=ON,
+              --log-replica-updates=ON, --binlog-format=ROW,
+              --plugin-load-add=group_replication.so,
+              --loose-group-replication-group-name=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee,
+              --loose-group-replication-start-on-boot=OFF,
+              --loose-group-replication-local-address=gr3:33061,
+              "--loose-group-replication-group-seeds=gr1:33061,gr2:33061,gr3:33061",
+              --loose-group-replication-recovery-get-public-key=ON,
+              --loose-group-replication-bootstrap-group=OFF]
+    ports: ["33073:3306"]

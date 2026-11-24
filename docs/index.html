@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mysql-ops-lab: replication, clusters and tuning</title>
+<meta name="description" content="MySQL 8.4 replication, Group Replication and query tuning, run against the real engine in Docker, plus a replica-health service on Kubernetes.">
+<meta property="og:title" content="mysql-ops-lab">
+<meta property="og:description" content="Break MySQL on purpose, then fix it.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b1220'/%3E%3Cpath d='M9 17l5 5 9-12' fill='none' stroke='%2334d399' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root{--bg:#070b14;--panel:#0d1424;--line:#1c2742;--ink:#e6edf7;--mute:#93a1b8;--acc:#34d399;--acc2:#60a5fa;--bad:#f87171}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:radial-gradient(1200px 600px at 80% -10%,#10223f 0,transparent 60%),radial-gradient(900px 500px at -10% 10%,#0d2a2a 0,transparent 55%),var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
+a{color:var(--acc2);text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:1040px;margin:0 auto;padding:0 24px}
+nav{display:flex;justify-content:space-between;align-items:center;padding:22px 0}
+.logo{font-weight:800;letter-spacing:-.02em;color:var(--ink)}
+.logo b{color:var(--acc)}
+nav .links a{margin-left:22px;color:var(--mute);font-size:14px}
+.hero{padding:70px 0 40px}
+.tag{display:inline-block;padding:5px 12px;border:1px solid var(--line);border-radius:99px;color:var(--acc);font-size:13px;background:#0b1a1c}
+h1{font-size:clamp(34px,6vw,60px);line-height:1.05;letter-spacing:-.035em;margin:18px 0 18px;font-weight:800}
+h1 span{background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:20px;color:var(--mute);max-width:680px}
+.cta{margin:30px 0 8px;display:flex;gap:12px;flex-wrap:wrap}
+.btn{padding:12px 20px;border-radius:10px;font-weight:600;border:1px solid var(--line);color:var(--ink);background:var(--panel)}
+.btn.p{background:linear-gradient(90deg,var(--acc),#22c1a5);color:#04130e;border:0}
+.btn:hover{text-decoration:none;filter:brightness(1.1)}
+.badge{margin-top:18px}
+.badge img{height:22px}
+section{padding:46px 0}
+h2{font-size:30px;letter-spacing:-.02em;margin:0 0 8px}
+.sub{color:var(--mute);margin:0 0 26px;max-width:680px}
+.flow{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;overflow-x:auto}
+.flow svg{display:block;min-width:760px;width:100%;height:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+.card h3{margin:0 0 6px;font-size:17px}
+.card p{margin:0;color:var(--mute);font-size:15px}
+.ok{color:var(--acc);font-weight:700;font-size:13px;letter-spacing:.04em;text-transform:uppercase}
+.warn{color:#fbbf24;font-weight:700;font-size:13px;letter-spacing:.04em;text-transform:uppercase}
+pre{background:#050810;border:1px solid var(--line);border-radius:12px;padding:18px;overflow-x:auto;font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cfe3ff}
+.c{color:#5f7191}
+table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;font-size:15px}
+th,td{padding:12px 16px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mute);font-weight:600;font-size:13px;text-transform:uppercase;letter-spacing:.05em;background:#0a1120}
+tr:last-child td{border-bottom:0}
+.pill{padding:2px 10px;border-radius:99px;font-size:12px;font-weight:700;white-space:nowrap}
+.pill.g{background:#0c2b22;color:var(--acc)}.pill.y{background:#2b230c;color:#fbbf24}
+footer{border-top:1px solid var(--line);padding:30px 0 50px;color:var(--mute);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <div class="logo">mysql<b>-</b>ops<b>-</b>lab</div>
+    <div class="links"><a href="#replication">Replication</a><a href="#cluster">Cluster</a><a href="#tuning">Tuning</a><a href="#k8s">Kubernetes</a><a href="#limits">Limits</a><a href="https://github.com/gerardrecinto/mysql-ops-lab">GitHub</a></div>
+  </nav>
+
+  <header class="hero">
+    <span class="tag">MySQL 8.4 · GTID · Group Replication · Docker · Kubernetes</span>
+    <h1>Break MySQL on purpose.<br><span>Then fix it, with proof.</span></h1>
+    <p class="lead">Replication lag, a duplicate-key stall, a failed primary, a missing index. Every scenario runs against the real engine in Docker, and every fix is a test that has to pass.</p>
+    <div class="cta">
+      <a class="btn p" href="https://github.com/gerardrecinto/mysql-ops-lab">View the code</a>
+      <a class="btn" href="https://github.com/gerardrecinto/mysql-ops-lab/actions">See the CI runs</a>
+    </div>
+    <div class="badge"><a href="https://github.com/gerardrecinto/mysql-ops-lab/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/gerardrecinto/mysql-ops-lab/actions/workflows/ci.yml/badge.svg"></a></div>
+  </header>
+
+  <section id="numbers">
+    <div class="grid">
+      <div class="card"><div class="ok">Tuning</div><h3>300,002 &rarr; 61</h3><p>Rows read for one customer lookup, before and after the index.</p></div>
+      <div class="card"><div class="ok">Digest</div><h3>900,000 : 3</h3><p>Rows examined against rows sent, the number that exposes a bad query.</p></div>
+      <div class="card"><div class="ok">Failover</div><h3>0 lost</h3><p>Transactions lost when a replica is promoted, checked with GTID_SUBTRACT.</p></div>
+      <div class="card"><div class="ok">Election</div><h3>3 &rarr; 2 &rarr; 3</h3><p>Group members online after the primary stops and the old one rejoins.</p></div>
+    </div>
+  </section>
+
+  <section id="replication">
+    <h2>Replication</h2>
+    <p class="sub">One primary, two replicas, GTID auto-position. No binlog file names anywhere.</p>
+    <table>
+      <tr><th>Scenario</th><th>What the test does</th></tr>
+      <tr><td>Lag</td><td>Stops the replica SQL thread, writes 20 rows, reads the GTID gap, restarts, waits for the gap to clear.</td></tr>
+      <tr><td>Stalled replica</td><td>Writes a row directly on a replica so the next insert fails with 1062, finds the error in <code>SHOW REPLICA STATUS</code>, removes the drift, resumes.</td></tr>
+      <tr><td>Failover</td><td>Stops the primary, promotes a replica, repoints the other with <code>SOURCE_AUTO_POSITION=1</code>, proves no transaction was lost.</td></tr>
+    </table>
+  </section>
+
+  <section id="cluster">
+    <h2>Group Replication</h2>
+    <p class="sub">Three nodes, single primary. The test stops the primary and watches the group recover.</p>
+    <div class="flow">
+      <svg viewBox="0 0 900 200" role="img" aria-label="Three member group: primary stops, secondary elected, old primary rejoins">
+        <g font-family="-apple-system,Segoe UI,sans-serif" font-size="14" fill="#e6edf7" text-anchor="middle">
+          <rect x="20" y="50" width="170" height="90" rx="12" fill="#0d1424" stroke="#34d399"/><text x="105" y="85" font-weight="700">gr1 PRIMARY</text><text x="105" y="108" fill="#93a1b8" font-size="12">gr2, gr3 SECONDARY</text>
+          <rect x="365" y="50" width="170" height="90" rx="12" fill="#2b1212" stroke="#f87171"/><text x="450" y="85" font-weight="700" fill="#f87171">gr1 stopped</text><text x="450" y="108" fill="#93a1b8" font-size="12">gr2 elected PRIMARY</text>
+          <rect x="710" y="50" width="170" height="90" rx="12" fill="#0d1424" stroke="#60a5fa"/><text x="795" y="85" font-weight="700">gr1 rejoins</text><text x="795" y="108" fill="#93a1b8" font-size="12">as SECONDARY, caught up</text>
+        </g>
+        <g stroke="#5f7191" stroke-width="2" fill="none"><path d="M195 95H360"/><path d="M540 95H705"/></g>
+      </svg>
+    </div>
+  </section>
+
+  <section id="tuning">
+    <h2>Tuning</h2>
+    <p class="sub">Find the slow query, read the plan, change one thing, measure again.</p>
+<pre><span class="c"># the digest view shows rows examined vs rows sent</span>
+SELECT DIGEST_TEXT, SUM_ROWS_EXAMINED, SUM_ROWS_SENT
+FROM performance_schema.events_statements_summary_by_digest
+ORDER BY SUM_ROWS_EXAMINED DESC LIMIT 1;
+
+<span class="c"># 300,002 rows read  &rarr;  61 rows read</span>
+ALTER TABLE orders ADD INDEX idx_customer (customer_id);</pre>
+    <div class="grid" style="margin-top:16px">
+      <div class="card"><h3>Composite index</h3><p>(status, created_at) removes the filesort on a filtered, ordered query.</p></div>
+      <div class="card"><h3>Covering index</h3><p>(customer_id, status, amount) answers from the index alone: <code>Using index</code>.</p></div>
+      <div class="card"><h3>Redundant indexes</h3><p>The sys schema report names the indexes another index already covers.</p></div>
+      <div class="card"><h3>Buffer pool</h3><p>Hit ratio read from status counters; pool resized online.</p></div>
+    </div>
+  </section>
+
+  <section id="k8s">
+    <h2>Docker and Kubernetes</h2>
+    <p class="sub">A 70-line service reports replica health. It is built, scanned, deployed to a kind cluster in CI, and checked from both sides.</p>
+    <div class="grid">
+      <div class="card"><div class="ok">Healthy replica</div><h3>HTTP 200</h3><p>Both threads running, lag under the limit.</p></div>
+      <div class="card"><div class="ok">Stopped SQL thread</div><h3>HTTP 503</h3><p>With the reason in the body, so a probe or alert can use it.</p></div>
+      <div class="card"><div class="ok">Image</div><h3>Non-root, scanned</h3><p>Trivy fails the build on fixable high or critical findings.</p></div>
+      <div class="card"><div class="ok">Jenkinsfile</div><h3>Test, build, scan, deploy</h3><p>Undoes the rollout on failure. Not run on a Jenkins server.</p></div>
+    </div>
+  </section>
+
+  <section id="limits">
+    <h2>What this does not prove</h2>
+    <p class="sub">So you do not have to guess.</p>
+    <div class="grid">
+      <div class="card"><div class="warn">One host</div><p>Group Replication runs as three containers on one machine. Network partitions and slow disks are not tested.</p></div>
+      <div class="card"><div class="warn">Small data</div><p>300,000 synthetic rows. Plans on large production tables will differ.</p></div>
+      <div class="card"><div class="warn">Not on Jenkins</div><p>The Jenkinsfile has not run on a Jenkins server. The same steps run in GitHub Actions.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    Built by <a href="https://github.com/gerardrecinto">Gerard Louis Recinto</a>. MIT licensed. <a href="https://github.com/gerardrecinto/mysql-ops-lab">Source</a>.
+  </footer>
+</div>
+</body>
+</html>
