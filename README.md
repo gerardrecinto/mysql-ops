@@ -27,7 +27,7 @@ Numbers above are from a local run. CI repeats every test on each push.
 ```bash
 pip install -r requirements.txt
 docker compose -f docker-compose.async.yml up -d
-python -m pytest tests/test_replication.py tests/test_tuning.py
+python -m pytest tests/test_tuning.py tests/test_replication.py
 docker compose -f docker-compose.async.yml down -v
 
 docker compose -f docker-compose.cluster.yml up -d

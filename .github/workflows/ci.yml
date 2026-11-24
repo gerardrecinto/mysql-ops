@@ -18,7 +18,7 @@ jobs:
         with: {python-version: '3.12'}
       - run: pip install -r requirements.txt
       - run: docker compose -f docker-compose.async.yml up -d
-      - run: python -m pytest tests/test_replication.py tests/test_tuning.py
+      - run: python -m pytest tests/test_tuning.py tests/test_replication.py
       - if: failure()
         run: docker compose -f docker-compose.async.yml logs --tail 80
       - if: always()
@@ -81,7 +81,7 @@ jobs:
           cat /tmp/r.json; test "$code" = 200
       - name: Broken replica answers 503
         run: |
-          kubectl exec deploy/mysql-replica -- mysql -uroot -prootpw -e "STOP REPLICA SQL_THREAD"
+          kubectl exec deploy/mysql-replica -- mysql -h127.0.0.1 -uroot -prootpw -e "STOP REPLICA SQL_THREAD"
           sleep 2
           code=$(curl -s -o /tmp/r.json -w '%{http_code}' localhost:8080/replication)
           cat /tmp/r.json; test "$code" = 503
