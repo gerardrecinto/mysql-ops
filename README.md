@@ -41,11 +41,6 @@ Needs Docker and Python 3.10+. Each file takes under two minutes.
 
 A 70-line service: `GET /replication` returns 200 when both threads run and lag is under `MAX_LAG_SECONDS`, 503 with a reason otherwise. `Dockerfile` builds it (non-root, scanned with Trivy), `k8s/lab.yaml` deploys it with a primary and replica, and the `Jenkinsfile` runs test, build, scan, push and deploy with `rollout undo` on failure.
 
-## What is not proven
-
-- The `Jenkinsfile` has not run on a Jenkins server. The same steps run in GitHub Actions.
-- Group Replication runs as three containers on one host, so network partitions and slow disks are not tested.
-- The data set is 300,000 synthetic rows. Plans on large production tables will differ.
-- The Kubernetes lab uses `emptyDir` storage and a plain password. It is not a production layout.
-
 MIT licensed.
+
+The Kubernetes lab uses `emptyDir` storage and a plain password, so change both before reuse.
